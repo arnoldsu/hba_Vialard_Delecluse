@@ -139,19 +139,69 @@ python hba_Vialard_Delecluse/python/prepare_data.py \
 
 The same variable names can be supplied from OM2 output. Coordinate names/grid staggering may differ, so the JNL dataset paths and any remapping must be adapted. Native-grid heat-transport divergence is preferred over differentiating already-remapped extensive face transports.
 
-## Run and compare
+## Run with pure Python
 
-The present scripts retain project-relative defaults and should be run from the parent project directory:
+Run commands from the parent project directory (`ba_26062026_jk`), because the defaults use `../data/cm2`:
 
 ```bash
+# Check that all required input variables exist.
+python hba_Vialard_Delecluse/python/prepare_data.py \
+  --source /g/data/p66/ars599/work_budget/data/cm2
+
+# Calculate the first 50 years (600 monthly records).
 python hba_Vialard_Delecluse/python/calculate_heat_budget.py \
   --data-dir ../data/cm2 --nmonths 600 \
   --output ACCESS_CM2_HBA_python_50yr_Wm2.nc
-python hba_Vialard_Delecluse/python/calculate_tendency_shf.py
-python hba_Vialard_Delecluse/python/compare_offline_reference_50yr.py
 ```
 
-The first command is the recommended JNL-free workflow. Remove `--nmonths 600` to process the full record. E1 and constant-Kv E2 remain hypotheses even though the Python calculation itself is complete.
+For the complete record, omit `--nmonths`:
+
+```bash
+python hba_Vialard_Delecluse/python/calculate_heat_budget.py \
+  --data-dir ../data/cm2 \
+  --output ACCESS_CM2_HBA_python_full_Wm2.nc
+```
+
+This is the recommended JNL-free workflow. It reads `temp`, `mld`, `u`, `v`, `wt` and the surface-flux inputs directly; it does not use JNL AX/AY/AZ as calculation inputs.
+
+## Run with Ferret/JNL
+
+On Gadi, from the same parent project directory:
+
+```bash
+module purge
+module load ferret
+ferret -nojnl -memsize 4000 \
+  -script hba_Vialard_Delecluse/jnl/hba_vialard_delecluse_wm2.jnl
+```
+
+The JNL currently reads `../data/cm2` and processes the complete time range found in `temp`. Its output name is set by the `ncfl` symbol near the beginning of the JNL. Change that symbol if an existing output must be preserved.
+
+## Run through PBS
+
+Check the account, storage and modules in the example, then submit it from the project directory:
+
+```bash
+qsub hba_Vialard_Delecluse/examples/run_50yr.pbs
+qstat -u "$USER"
+```
+
+## Generate comparisons
+
+After the required calculation and reference files exist:
+
+```bash
+# Offline Python terms against model/reference diagnostics.
+python hba_Vialard_Delecluse/python/compare_offline_reference_50yr.py
+
+# Offline E1+E2 attribution tests.
+python hba_Vialard_Delecluse/python/compare_e1e2_candidates_50yr.py
+
+# Final pure-Python versus JNL comparison.
+python hba_Vialard_Delecluse/python/compare_python_jnl_50yr.py
+```
+
+E1 and constant-Kv E2 remain hypotheses even though both implementations calculate them completely.
 
 ### Pure Python versus JNL (first 50 years)
 
