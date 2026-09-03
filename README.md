@@ -128,6 +128,52 @@ Important unit point: JNL E1/E2 formulas generate temperature tendency rates. Th
 
 No large model data are stored in this directory.
 
+## Required input data
+
+The data directory is not sufficient by itself: it must contain the following NetCDF files and variables. Filenames may have a different experiment/member/date suffix, but the prefix and internal variable name must match unless the scripts are adapted.
+
+### Required for the complete offline calculation
+
+| Filename pattern | Variable | Expected dimensions | Expected units | Used for |
+|---|---|---|---|---|
+| `temp_Omon_*.nc` | `temp` | `time, st_ocean, lat, lon` | degC | Tm, Tb, TEND, temperature gradients, E1 and E2 |
+| `mld_Omon_*.nc` | `mld` | `time, lat, lon` | m | Time-dependent mixed-layer mask and H |
+| `u_Omon_*.nc` | `u` | `time, st_ocean, lat, lon` | m s-1 | AX |
+| `v_Omon_*.nc` | `v` | `time, st_ocean, lat, lon` | m s-1 | AY |
+| `wt_Omon_*.nc` | `wt` | `time, sw_ocean, lat, lon` (or compatible vertical dimension) | m s-1 | AZ at the MLD base |
+| `sw_heat_Omon_*.nc` | `sw_heat` | `time, st_ocean, lat, lon` | W m-2 per layer | Shortwave penetrating below MLD |
+| `sfc_hflux_coupler_Omon_*.nc` | `sfc_hflux_coupler` | `time, lat, lon` | W m-2 | Coupled sensible + latent + LW + SW flux |
+| `sfc_hflux_pme_Omon_*.nc` | `sfc_hflux_pme` | `time, lat, lon` | W m-2 | Heat carried by precipitation-minus-evaporation mass transfer |
+| `frazil_3d_Omon_*.nc` | `frazil_3d` | `time, st_ocean, lat, lon` | W m-2 | Frazil/sea-ice heat contribution |
+
+The pure-Python calculation therefore reads `temp`, `mld`, `u`, `v`, `wt`, `sw_heat`, `sfc_hflux_coupler`, `sfc_hflux_pme` and `frazil_3d`. It does not need `temp_advection` or JNL output to calculate the budget.
+
+### Required only for validation/comparison
+
+| Filename/variable | Purpose |
+|---|---|
+| `temp_vdiffuse_sbc_Omon_*.nc` / `temp_vdiffuse_sbc` | Reference for the surface-boundary heat contribution; subtract `SW_below_MLD` for a like-for-like SEF reference |
+| `temp_tendency_Omon_*.nc` / `temp_tendency` | Model heat-tendency reference and E1+E2 remainder calculation |
+| Native or prepared `temp_advection` | Reference for total `AX+AY+AZ`; the current prepared file is `temp_advection_Omon_bj594_piControl_pac_top50.nc` |
+| JNL outputs `ACCESS_CM2_ml_heatb_adv_wm2_v8.nc` and `ACCESS_CM2_adv_only_wm2_v8.nc` | Only required by the Python-versus-JNL comparison script |
+
+### Optional process diagnostics for E1/E2 attribution
+
+| Filename pattern / variable | Process |
+|---|---|
+| `temp_vdiffuse_diff_cbt_Omon_*.nc` | Convective/background vertical diffusion |
+| `temp_nonlocal_KPP_Omon_*.nc` | Non-local KPP heating |
+| `temp_vdiffuse_k33_Omon_*.nc` | K33 vertical diffusion |
+| `temp_sigma_diff_Omon_*.nc` | Sigma-coordinate diffusion |
+| `neutral_diffusion_temp_Omon_*.nc` | Neutral diffusion |
+| `neutral_gm_temp_Omon_*.nc` | GM stirring |
+| `temp_submeso_Omon_*.nc` | Submesoscale tendency |
+| `mixdownslope_temp_Omon_*.nc` | Downslope mixing |
+| `temp_rivermix_Omon_*.nc` | River mixing |
+| `temp_eta_smooth_Omon_*.nc` | Surface/eta smoothing |
+
+All calculation inputs must describe the same monthly records and compatible grids. If u, v, w and tracer temperature remain on different native staggered grids, they must be placed consistently at tracer points or the native-grid flux-divergence method should be used. Do not bilinearly remap extensive face transports in watts before taking their divergence.
+
 ## Input preparation
 
 Validate the existing ACCESS-CM2 directory:
