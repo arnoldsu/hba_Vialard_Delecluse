@@ -1,0 +1,185 @@
+\ cancel mode verify
+!-----------------------------------------------------------------------
+! Mixed Layer Heat Budget Calculation using Vialard and Delecluse (1999a)
+! Adapted for ACCESS-CM2 Omon CMIP6 outputs
+!-----------------------------------------------------------------------
+
+     define symbol do_write = YES
+     define symbol ncfl     = ACCESS_CM2_ml_heatb_adv_wm2_v8.nc
+
+     set memory/size=4000
+
+! ---- OPEN DATASETS (Updated paths for ACCESS-CM2) ----
+     define symbol mer = ../data/cm2
+     set data "($mer)/temp_Omon_bj594_piControl_r1i1p1_pac.nc"                 ! d=1
+     set data "($mer)/mld_Omon_bj594_piControl_r1i1p1_pac.nc"                  ! d=2
+     set data "($mer)/u_Omon_bj594_piControl_r1i1p1_pac.nc"                    ! d=3
+     set data "($mer)/v_Omon_bj594_piControl_r1i1p1_pac.nc"                    ! d=4
+     set data "($mer)/wt_Omon_bj594_piControl_r1i1p1_pac.nc"                   ! d=5
+     set data "($mer)/sw_heat_Omon_bj594_piControl_r1i1p1_pac.nc"              ! d=6
+     set data "($mer)/sfc_hflux_coupler_Omon_bj594_piControl_r1i1p1_pac.nc"   ! d=7
+     set data "($mer)/sfc_hflux_pme_Omon_bj594_piControl_r1i1p1_pac.nc"       ! d=8
+     set data "($mer)/frazil_3d_Omon_bj594_piControl_r1i1p1_pac.nc"            ! d=9 (Replacing frazil_2d with 3D or surface equivalent if integrated)
+
+     sh/bri da
+     let l_start=`temp[d=1],r=lstart`
+     let l_end  =`temp[d=1],r=lend`
+
+! ---- VARIABLE DEFINITIONS ----
+     let t_ctrl   = temp[d=1]          
+     let h_ctrl   = mld[d=2]              
+     let u_ctrl   = u[d=3,g=t_ctrl@ASN]   
+     let v_ctrl   = v[d=4,g=t_ctrl@ASN]   
+     let w_ctrl   = wt[d=5]               
+
+     let convert = 1           
+
+! ---- GRID GEOMETRY & MASKING ----
+! Using the identical ZSEQUENCE from original configuration
+     let ztop     = ZSEQUENCE({5, 15, 25, 35, 45, 55, 65, 75, 85, 95, 105, 115, 125, 135, 145,  \
+                               155, 165, 175, 185, 195, 205, 216.846755981445, 241.349014282227,  \
+                               280.780731201172, 343.250457763672, 427.315551757812, 536.715637207031,  \
+                               665.414123535156, 812.781616210938, 969.065124511719, 1130.93493652344,  \
+                               1289.60461425781, 1455.77014160156, 1622.92565917969, 1801.55810546875,  \
+                               1984.85461425781, 2182.90478515625, 2388.41748046875, 2610.93505859375,  \
+                               2842.564453125, 3092.20483398438, 3351.29467773438, 3628.0576171875,  \
+                               3913.26440429688, 4214.4951171875, 4521.91796875, 4842.56591796875,  \
+                               5166.1298828125, 5499.2451171875, 5831.29443359375})
+     let cell_top = ztop[GZ=t_ctrl@ASN]
+     let cell_bot = cell_top[k=@SHF:1] 
+
+     let mld_mask = IF cell_top LT h_ctrl THEN 1 
+
+     let h_extn_1    = cell_bot * mld_mask       
+     let h_kvals     = K[g=h_extn_1] + h_extn_1 * 0
+     let h_kzero     = h_kvals - h_kvals[k=1:`h_kvals,return=kend`@MAX]
+     let h_extn_z    = h_extn_1 * h_kzero[k=@WEQ:0]
+     let h_extn      = h_extn_z[k=@SUM]
+
+! ---- CONSTANTS ----
+     let Cp      = 3989.24495  ! J/Kg/K
+     let rho_0   = 1035.00000  ! Reference density Kg/m^3
+
+!-----------------------------------------------------------------------
+! 1. SST TENDENCY (dT/dt)
+!-----------------------------------------------------------------------
+     let t_mld    = t_ctrl * mld_mask
+     let T_mix    = t_mld[Z=@AVE]
+     let dT_dt    = T_mix[t=@DDC]*convert
+     set var/title="SST Tendency : Av. Ov. MLD (ACCESS-CM2)"/units="^oC/month" dT_dt
+
+     IF ($do_write) THEN
+        sp rm -f ($ncfl)
+        REPEAT/L=`l_start`:`l_end`:1 (;\
+           SAVE/file=($ncfl)/append/quiet dT_dt;\
+        )
+     ENDIF
+
+!-----------------------------------------------------------------------
+! 2. ATMOSPHERIC FORCING (SEF)
+!-----------------------------------------------------------------------
+     let sw_ctrl      = sw_heat[d=6,g=t_ctrl@ASN]   
+     let sfc_c_ctrl   = sfc_hflux_coupler[d=7]      
+     let sfc_pme_ctrl = sfc_hflux_pme[d=8]          
+     let fr_ctrl      = frazil_3d[d=9,k=1]          ! Surface layer fraction for 2D balance
+
+     let swmld  = sw_ctrl * mld_mask 
+     let swttl  = sw_ctrl        
+     let swout  = swttl[k=@sum] - swmld[k=@sum]        
+
+     let Qnet   = sfc_c_ctrl + sfc_pme_ctrl + fr_ctrl - swout
+     let SEF    = (Qnet/(rho_0*Cp*h_extn) ) * convert
+
+     set var/title="Atm. Forcing : Av. Ov. MLD (ACCESS-CM2)"/units="^oC/month" SEF
+
+     IF ($do_write) THEN
+        REPEAT/L=`l_start`:`l_end`:1 (;\
+           save/file=($ncfl)/append/quiet SEF;\
+        )
+     ENDIF
+
+!-----------------------------------------------------------------------
+! 3. HORIZONTAL ADVECTION (Ax, Ay)
+!-----------------------------------------------------------------------
+     let dT_dx = t_ctrl[x=@DDC] 
+     let u_adv = u_ctrl * dT_dx * mld_mask                    
+     let Ax = (-1)*rho_0*Cp*u_adv[z=@DIN]
+     set var/title="U Adv. : Av. Ov. MLD (ACCESS-CM2)"/units="W/m^2" Ax
+
+     IF ($do_write) THEN
+        REPEAT/L=`l_start`:`l_end`:1 (;\
+            save/file=($ncfl)/append/quiet Ax;\
+        )
+     ENDIF
+
+     let dT_dy = t_ctrl[y=@DDC] 
+     let v_adv = v_ctrl * dT_dy * mld_mask
+     let Ay = (-1)*rho_0*Cp*v_adv[z=@DIN]
+     set var/title="V Adv. : Av. Ov. MLD (ACCESS-CM2)"/units="W/m^2" Ay
+
+     IF ($do_write) THEN
+        REPEAT/L=`l_start`:`l_end`:1 (;\
+            save/file=($ncfl)/append/quiet Ay;\
+        )
+     ENDIF
+
+!-----------------------------------------------------------------------
+! 4. VERTICAL ADVECTION (Az)
+!-----------------------------------------------------------------------
+     let bot_mask     = IF cell_top GE h_ctrl THEN 1
+     let t_bot        = t_ctrl * bot_mask
+     let kvals        = k[g=t_bot] + t_bot * 0
+     let kzero        = kvals - kvals[k=1:`kvals,return=kend`@MIN]
+     let T_mix_base_z = t_bot * kzero[k=@WEQ:0]
+     let T_mix_base   = T_mix_base_z[k=@SUM]
+
+     let mld_mask_w1  = IF cell_top LE h_ctrl THEN 1 
+     let w1_mld       = w_ctrl * mld_mask_w1         
+     let wkvals       = K[g=w1_mld] + w1_mld *0      
+     let wkzero       = wkvals - wkvals[k=1:`wkvals,return=kend`@MAX]
+     let w_mix_base_z = w1_mld * wkzero[k=@WEQ:0]
+     let w_mix_base   = w_mix_base_z[k=@SUM]
+
+     let Az_t1    = w_mix_base * (T_mix_base - T_mix)  
+     let Az = rho_0*Cp*Az_t1
+     set var/title="W Adv. : Av. Ov. MLD (ACCESS-CM2)"/units="W/m^2" Az
+
+     IF ($do_write) THEN
+        REPEAT/L=`l_start`:`l_end`:1 (;\
+           save/file=($ncfl)/append/quiet Az;\
+        )
+     ENDIF
+
+!-----------------------------------------------------------------------
+! 5. ENTRAINMENT (E_t1, E_t2)
+!-----------------------------------------------------------------------
+     ! Term 1: dh/dt driven entrainment
+     let dh_dt           = h_extn[t=@DDC]
+     let gamma           = IF dh_dt GT 0 THEN 1 ELSE 0 
+     let E_term1         = dh_dt*gamma*(T_mix_base - T_mix)
+     let E_t1            = (1/h_extn) * E_term1 * convert
+     set var/title="Entraintment term 1: At Base of ML (ACCESS-CM2)"/units="^oC/month" E_t1
+
+     IF ($do_write) THEN
+        REPEAT/L=`l_start`:`l_end`:1 (;\
+           save/file=($ncfl)/append/quiet E_t1;\
+        )
+     ENDIF
+
+     ! Term 2: Vertical diffusion at the base of ML (Using kappa_h = 1*10^-5 m^2/s)
+     let dT_dz           = t_ctrl[k=@DDC]
+     let dT_dz_mld       = dT_dz*bot_mask
+     let vd_kvals        = k[g=dT_dz_mld] + dT_dz_mld * 0
+     let vd_kzero        = vd_kvals - vd_kvals[k=1:`vd_kvals,return=kend`@MIN]
+     let dT_dz_base_z    = dT_dz_mld * vd_kzero[k=@WEQ:0]
+     let dT_dz_base      = dT_dz_base_z[k=@SUM]
+
+     let E_term2 = 1e-5 * dT_dz_base
+     let E_t2    = (1/h_extn) * E_term2 * convert
+     set var/title="Entraintment term 2: At Base of ML (ACCESS-CM2)"/units="^oC/month" E_t2
+
+     IF ($do_write) THEN
+        REPEAT/L=`l_start`:`l_end`:1 (;\
+           save/file=($ncfl)/append/quiet E_t2;\
+        )
+     ENDIF

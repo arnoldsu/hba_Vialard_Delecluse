@@ -1,0 +1,20 @@
+#!/bin/bash -l
+#PBS -P p66
+#PBS -q normal
+#PBS -l ncpus=8
+#PBS -l mem=64GB
+#PBS -l walltime=24:00:00
+#PBS -l storage=gdata/p66+scratch/p66
+#PBS -N hba50yr
+#PBS -j oe
+
+module purge
+module load python3
+cd "$PBS_O_WORKDIR"
+
+python hba_Vialard_Delecluse/python/prepare_data.py --source data/cm2
+python hba_Vialard_Delecluse/python/calculate_heat_budget.py \
+  --data-dir ../data/cm2 --nmonths 600 \
+  --output ACCESS_CM2_HBA_python_50yr_Wm2.nc
+python hba_Vialard_Delecluse/python/calculate_tendency_shf.py
+python hba_Vialard_Delecluse/python/compare_offline_reference_50yr.py
